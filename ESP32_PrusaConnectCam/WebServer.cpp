@@ -46,21 +46,28 @@ void Server_InitWebServer() {
     }
     SystemCamera.SetPhotoSending(true);
 
-    SystemLog.AddEvent(LogLevel_Verbose, "Photo size: " + String(SystemCamera.GetPhotoFb()->len) + " bytes");
+    camera_fb_t *photo = SystemCamera.GetPhotoFb();
+    if ((photo == NULL) || (photo->buf == NULL) || (photo->len == 0)) {
+      SystemCamera.SetPhotoSending(false);
+      request->send(404, "text/plain", "Photo buffer not available!");
+      return;
+    }
+
+    SystemLog.AddEvent(LogLevel_Verbose, "Photo size: " + String(photo->len) + " bytes");
 
     if (SystemCamera.GetPhotoExifData()->header != NULL) {
       /* send photo with exif data */
       SystemLog.AddEvent(LogLevel_Verbose, F("Send photo with EXIF data"));
-      size_t total_len = SystemCamera.GetPhotoExifData()->len + SystemCamera.GetPhotoFb()->len - SystemCamera.GetPhotoExifData()->offset;
-      auto response = request->beginChunkedResponse("image/jpg", [total_len](uint8_t *buffer, size_t maxLen, size_t index) -> size_t {
+      size_t total_len = SystemCamera.GetPhotoExifData()->len + photo->len - SystemCamera.GetPhotoExifData()->offset;
+      auto response = request->beginChunkedResponse("image/jpeg", [total_len, photo](uint8_t *buffer, size_t maxLen, size_t index) -> size_t {
         size_t len = 0;
         if (index < SystemCamera.GetPhotoExifData()->len) {
           len = min(maxLen, SystemCamera.GetPhotoExifData()->len - index);
           memcpy(buffer, SystemCamera.GetPhotoExifData()->header + index, len);
         } else {
           size_t offset = index - SystemCamera.GetPhotoExifData()->len + SystemCamera.GetPhotoExifData()->offset;
-          len = min(maxLen, SystemCamera.GetPhotoFb()->len - offset);
-          memcpy(buffer, SystemCamera.GetPhotoFb()->buf + offset, len);
+          len = min(maxLen, photo->len - offset);
+          memcpy(buffer, photo->buf + offset, len);
         }
         return len;
       });
@@ -69,7 +76,7 @@ void Server_InitWebServer() {
     } else {
       /* send photo without exif data */
       SystemLog.AddEvent(LogLevel_Verbose, F("Send photo without EXIF data"));
-      request->send(200, "image/jpg", SystemCamera.GetPhotoFb()->buf, SystemCamera.GetPhotoFb()->len);
+      request->send(200, "image/jpeg", photo->buf, photo->len);
     }
 
     SystemCamera.SetPhotoSending(false);
