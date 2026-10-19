@@ -374,7 +374,7 @@ void Camera::GetCameraModel() {
 
   CameraType = (camera_pid_t) sensor->id.PID;
   CameraName = info->name;
-  update_exif_model(info->model);
+  update_exif_model((sensor->id.PID == OV3660_PID) ? "OV3660" : CAMERA_MODEL);
   log->AddEvent(LogLevel_Info, F("Camera type: "), String(CameraType));
   log->AddEvent(LogLevel_Info, F("Camera name: "), String(CameraName));
   log->AddEvent(LogLevel_Info, F("Camera model: "), String(info->model));
