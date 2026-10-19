@@ -28,6 +28,7 @@
 
 #include <time.h>
 #include <sys/time.h>
+#include <string.h>
 
 #include "exif.h"
 #include "exif_defines.h"
@@ -327,6 +328,19 @@ bool update_exif_from_cfg(const uint8_t c)
 {
   exif_hdr.tiff_data.ifd0.entries[TAG_IFD0_ORIENTATION_IDX].value = IFD_SET_SHORT(c);
 
+  return true;
+}
+
+bool update_exif_model(const char *model)
+{
+  if (model == NULL) {
+    return false;
+  }
+
+  memset(exif_hdr.tiff_data.ifd0_data.model, 0, sizeof(exif_hdr.tiff_data.ifd0_data.model));
+  strncpy(exif_hdr.tiff_data.ifd0_data.model,
+          model,
+          sizeof(exif_hdr.tiff_data.ifd0_data.model) - 1);
   return true;
 }
 

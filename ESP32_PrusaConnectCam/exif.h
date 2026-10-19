@@ -50,6 +50,9 @@
  */
 bool update_exif_from_cfg(const uint8_t);
 
+/** Update the camera model stored in generated EXIF metadata. */
+bool update_exif_model(const char *model);
+
 #ifdef WITH_GNSS
 /**
  * Update GPS data in EXIF header

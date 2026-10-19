@@ -107,7 +107,7 @@ void Camera::InitCameraModule() {
   CameraConfig.pin_sccb_scl = SIOC_GPIO_NUM;
   CameraConfig.pin_pwdn = PWDN_GPIO_NUM;
   CameraConfig.pin_reset = RESET_GPIO_NUM;
-  CameraConfig.xclk_freq_hz = 15000000;       // or 3000000; 16500000; 20000000
+  CameraConfig.xclk_freq_hz = 20000000;       // OV3660 requires 20 MHz; OV2640 supports it too
   CameraConfig.pixel_format = PIXFORMAT_JPEG; /* YUV422,GRAYSCALE,RGB565,JPEG */
 
   /* OV2640
@@ -300,6 +300,10 @@ void Camera::ApplyCameraCfg() {
 
   /* sensor configuration */
   sensor = esp_camera_sensor_get();
+  if (sensor == NULL) {
+    log->AddEvent(LogLevel_Error, F("Camera sensor is NULL; skip camera configuration"));
+    return;
+  }
   sensor->set_brightness(sensor, brightness);         // -2 to 2
   sensor->set_contrast(sensor, contrast);             // -2 to 2
   sensor->set_saturation(sensor, saturation);         // -2 to 2
@@ -322,6 +326,17 @@ void Camera::ApplyCameraCfg() {
   sensor->set_vflip(sensor, vflip);                   // vertical flip 0 = disable , 1 = enable
   sensor->set_dcw(sensor, 1);                         // 0 = disable , 1 = enable
   sensor->set_colorbar(sensor, 0);                    // external collor lines, 0 = disable , 1 = enable
+
+  /* OV3660-specific initialization. Keep OV2640 defaults unchanged. */
+  if (sensor->id.PID == OV3660_PID) {
+    sensor->set_vflip(sensor, 1);          // OV3660 image is natively inverted
+    sensor->set_saturation(sensor, -2);     // reduce initial oversaturation
+    if (TFrameSize > FRAMESIZE_SXGA) {
+      log->AddEvent(LogLevel_Warning, F("OV3660: frame size exceeds SXGA, clamping"));
+      TFrameSize = FRAMESIZE_SXGA;
+      sensor->set_framesize(sensor, FRAMESIZE_SXGA);
+    }
+  }
 }
 
 /**
@@ -359,6 +374,7 @@ void Camera::GetCameraModel() {
 
   CameraType = (camera_pid_t) sensor->id.PID;
   CameraName = info->name;
+  update_exif_model(info->model);
   log->AddEvent(LogLevel_Info, F("Camera type: "), String(CameraType));
   log->AddEvent(LogLevel_Info, F("Camera name: "), String(CameraName));
   log->AddEvent(LogLevel_Info, F("Camera model: "), String(info->model));
@@ -396,15 +412,16 @@ void Camera::CapturePhoto() {
 
     if (FrameBuffer) {
       esp_camera_fb_return(FrameBuffer);
+      FrameBuffer = NULL;
     }
 
     /* Capturing a training photo. Without this sequence, the camera will not obtain the current photo but photo from the previous cycle. */
     FrameBuffer = esp_camera_fb_get();
     if (FrameBuffer) {
       esp_camera_fb_return(FrameBuffer);
+      FrameBuffer = NULL;
       log->AddEvent(LogLevel_Verbose, F("Camera capture training photo"));
     } else {
-      esp_camera_fb_return(FrameBuffer);
       log->AddEvent(LogLevel_Error, F("Camera capture failed training photo"));
       //ReinitCameraModule();
     }
@@ -419,6 +436,9 @@ void Camera::CapturePhoto() {
       if (!FrameBuffer) {
         CameraCaptureFailedCounter++;
         log->AddEvent(LogLevel_Error, F("Camera capture failed! photo. Attempt: "), String(CameraCaptureFailedCounter));
+        if (true == CameraFlashEnable) {
+          SetFlashStatus(false);
+        }
         xSemaphoreGive(frameBufferSemaphore);  // Release semaphore before returning
         return;
       }
@@ -450,11 +470,15 @@ void Camera::CapturePhoto() {
       }
 
       attempts++;
+      if (FrameBuffer->len <= 100) {
+        esp_camera_fb_return(FrameBuffer);
+        FrameBuffer = NULL;
+      }
       if (attempts >= maxAttempts) {
         log->AddEvent(LogLevel_Error, F("Failed to capture a valid photo after max attempts"));
         break;
       }
-    } while (!(FrameBuffer->len > 100));
+    } while ((FrameBuffer != NULL) && (FrameBuffer->len <= 100));
 
     /* Disable flash */
     if (true == CameraFlashEnable) {
